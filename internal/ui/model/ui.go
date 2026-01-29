@@ -529,13 +529,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
+
+		if cmd := m.handleClickFocus(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 		switch m.state {
 		case uiChat:
 			x, y := msg.X, msg.Y
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if m.chat.HandleMouseDown(x, y) {
+			if !m.isSidebarClick(msg) && m.chat.HandleMouseDown(x, y) {
 				m.lastClickTime = time.Now()
 			}
 		}
@@ -883,6 +888,48 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
+	switch {
+	case m.state != uiChat:
+		return nil
+	case m.isSidebarClick(msg):
+		return nil
+	case m.focus != uiFocusEditor && m.isEditorClick(msg):
+		m.focus = uiFocusEditor
+		cmd = m.textarea.Focus()
+		m.chat.Blur()
+	case m.focus != uiFocusMain && m.isChatClick(msg):
+		m.focus = uiFocusMain
+		m.textarea.Blur()
+		m.chat.Focus()
+	}
+	return cmd
+}
+
+func (m *UI) isSidebarClick(msg tea.MouseClickMsg) bool {
+	var (
+		x, y    = msg.X, msg.Y
+		sidebar = m.layout.sidebar
+	)
+	return !sidebar.Empty() && x >= sidebar.Min.X && x < sidebar.Max.X && y >= sidebar.Min.Y && y < sidebar.Max.Y
+}
+
+func (m *UI) isEditorClick(msg tea.MouseClickMsg) bool {
+	var (
+		x, y   = msg.X, msg.Y
+		editor = m.layout.editor
+	)
+	return x >= editor.Min.X && x < editor.Max.X && y >= editor.Min.Y && y < editor.Max.Y
+}
+
+func (m *UI) isChatClick(msg tea.MouseClickMsg) bool {
+	var (
+		x, y = msg.X, msg.Y
+		main = m.layout.main
+	)
+	return x >= main.Min.X && x < main.Max.X && y >= main.Min.Y && y < main.Max.Y
 }
 
 // updateSessionMessage updates an existing message in the current session in the chat
