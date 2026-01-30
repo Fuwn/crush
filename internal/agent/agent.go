@@ -167,7 +167,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
 	systemPrompt := a.systemPrompt.Get()
-	promptPrefix := a.systemPromptPrefix.Get()
+	promptPrefix := a.promptPrefix()
 	var instructions strings.Builder
 
 	for _, server := range mcp.GetStates() {
@@ -564,7 +564,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	// Copy mutable fields under lock to avoid races with SetModels.
 	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
+	systemPromptPrefix := a.promptPrefix()
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -769,7 +769,7 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 
 	smallModel := a.smallModel.Get()
 	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
+	systemPromptPrefix := a.promptPrefix()
 
 	var maxOutputTokens int64 = 40
 	if smallModel.CatwalkCfg.CanReason {
@@ -866,6 +866,10 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
 
+	if a.isClaudeCode() {
+		cost = 0
+	}
+
 	// Use override cost if available (e.g., from OpenRouter).
 	if openrouterCost != nil {
 		cost = *openrouterCost
@@ -902,6 +906,10 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
+
+	if a.isClaudeCode() {
+		cost = 0
+	}
 
 	a.eventTokensUsed(session.ID, model, usage, cost)
 
@@ -1014,6 +1022,20 @@ func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 
 func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
+}
+
+func (a *sessionAgent) promptPrefix() string {
+	if a.isClaudeCode() {
+		return "You are Claude Code, Anthropic's official CLI for Claude."
+	}
+	return a.systemPromptPrefix.Get()
+}
+
+// XXX: this should be generalized to cover other subscription plans, like Copilot.
+func (a *sessionAgent) isClaudeCode() bool {
+	cfg := config.Get()
+	pc, ok := cfg.Providers.Get(a.largeModel.Get().ModelCfg.Provider)
+	return ok && pc.ID == string(catwalk.InferenceProviderAnthropic) && pc.OAuthToken != nil
 }
 
 // convertToToolResult converts a fantasy tool result to a message tool result.
